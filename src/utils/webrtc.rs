@@ -1,4 +1,4 @@
-use crate::app::ChaosMessage;
+use crate::state::ChaosMessage;
 
 use super::message::CCMessage;
 

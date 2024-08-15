@@ -1,53 +1,43 @@
 use std::sync::Arc;
 
-use anyhow::Result;
-use chrono::Timelike;
-use eframe::{Frame, Storage};
-use egui::WidgetType::TextEdit;
-use egui::{Color32, Context};
-use futures_util::stream::SplitSink;
-use futures_util::{SinkExt, TryFutureExt};
-use rand::distributions::Alphanumeric;
-use rand::Rng;
-use tokio::net::TcpStream;
-use tokio::runtime::{self, Runtime};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::{Mutex, RwLock};
-use tokio::time::Duration;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use webrtc::api::interceptor_registry::register_default_interceptors;
-use webrtc::api::media_engine::MediaEngine;
-use webrtc::api::APIBuilder;
-use webrtc::data_channel::data_channel_message::DataChannelMessage;
-use webrtc::data_channel::RTCDataChannel;
-use webrtc::ice_transport::ice_credential_type::RTCIceCredentialType;
-use webrtc::ice_transport::ice_server::RTCIceServer;
-use webrtc::interceptor::registry::Registry;
-use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::math_rand_alpha;
-use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
-use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use eframe::Frame;
+use egui::Context;
+use tokio::sync::Mutex;
 
-use crate::utils::crypto;
-use crate::utils::message::{CCErrors, CCMessage};
-use crate::utils::webrtc::CommunicationType;
+use crate::scheduler::{ChannelAttachment, Command, GUICommand};
+use crate::state::{ConnectionProgress, GUIState, SidebarButton, UserId};
+use crate::utils::Attach;
 
-#[derive(Clone)]
-pub struct ChaosMessage {
-    pub client_id: String,
-    pub message_content: String,
+pub struct Chaos {
+    pub gui_state: Arc<Mutex<GUIState>>,
+    pub attachment: Arc<Mutex<ChannelAttachment>>,
+    // pub independent_state: Arc<RwLock<IndependentState>>, //only for reading
+    pub reader_thread: bool,
 }
-impl Default for ChaosMessage {
-    fn default() -> Self {
+impl Chaos {
+    pub fn new(
+        gui_state: Arc<Mutex<GUIState>>,
+        // independent_state: Arc<RwLock<IndependentState>>,
+        attachment: ChannelAttachment,
+    ) -> Self {
         Self {
-            client_id: Default::default(),
-            message_content: Default::default(),
+            gui_state,
+            // independent_state,
+            attachment: Arc::new(Mutex::new(attachment)),
+            reader_thread: false,
         }
     }
 }
-
-pub struct Chaos {
+impl Attach for Chaos {
+    fn attach(
+        &mut self,
+        channel_attachment: ChannelAttachment,
+        _: Option<crate::scheduler::ThreadTypes>,
+    ) {
+        self.attachment = Arc::new(Mutex::new(channel_attachment));
+    }
+}
+/*pub struct Chaos {
     tx_gui: Sender<CommunicationType>,
     tx_con: Sender<CommunicationType>,
     pub client_id: Arc<Mutex<String>>,
@@ -60,6 +50,8 @@ pub struct Chaos {
     pub connection_errors: Arc<Mutex<CCErrors>>,
     pub call_request: Arc<Mutex<bool>>,
 }
+*/
+
 //impl Default for Chaos {
 //   fn default() -> Self {
 //  Self {
@@ -76,7 +68,8 @@ pub struct Chaos {
 //   }
 //}
 //move modifiable state to a single struct
-impl Chaos {
+
+/*impl Chaos {
     pub fn new(
         tx_gui: Sender<CommunicationType>,
         tx_con: Sender<CommunicationType>,
@@ -102,12 +95,166 @@ impl Chaos {
             call_request,
         }
     }
+}*/
+fn menu_bar(ctx: &Context) {
+    egui::TopBottomPanel::top("top_pannel").show(ctx, |ui| {
+        egui::menu::bar(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui.button("Quit").clicked() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            });
+            ui.add_space(16.0);
+            egui::widgets::global_dark_light_mode_buttons(ui);
+        });
+    });
+}
+fn connection_request_popup(
+    ctx: &Context,
+    remote_id: &UserId,
+    attachment: &Arc<Mutex<ChannelAttachment>>,
+) {
+    ctx.show_viewport_immediate(
+        egui::ViewportId::from_hash_of("Connection Request"),
+        egui::ViewportBuilder::default()
+            .with_title("Connection Request")
+            .with_inner_size([200.0, 100.0]),
+        |ctx, class| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let attachment = attachment.try_lock().unwrap();
+                let (tx, _) = attachment.clone();
+                if ui.button("Accept").clicked() {
+                    tx.try_send(Command::GUI(GUICommand::CallAnswer(
+                        true,
+                        remote_id.clone(),
+                    )))
+                    .unwrap();
+                }
+                if ui.button("Cancel").clicked() {
+                    tx.try_send(Command::GUI(GUICommand::CallAnswer(
+                        false,
+                        remote_id.clone(),
+                    )))
+                    .unwrap();
+                }
+            });
+        },
+    );
+}
+fn app_body(
+    ctx: &Context,
+    gui_state: &mut Arc<Mutex<GUIState>>,
+    // independent_state: &mut Arc<RwLock<IndependentState>>,
+    attachment: &mut Arc<Mutex<ChannelAttachment>>,
+) {
+    let gui_state = gui_state.clone();
+    let gui_state2 = gui_state.clone();
+
+    // let independent_state = independent_state.clone();
+    // let independent_state2 = independent_state.clone(); //never make this mut
+    //
+    let attachment = attachment.clone();
+    let attachment2 = attachment.clone();
+    egui::SidePanel::left("sidebar")
+        .resizable(true)
+        .default_width(150.0)
+        .show(ctx, move |ui| {
+            let mut gui_state = gui_state.try_lock().unwrap().clone();
+            // let independent_state = independent_state.try_read().unwrap();
+
+            if ui
+                .selectable_label(
+                    gui_state.current_sidebar_button == SidebarButton::NewConnection,
+                    format!("{:?}", SidebarButton::NewConnection),
+                )
+                .clicked()
+            {
+                gui_state.current_sidebar_button = SidebarButton::NewConnection;
+            }
+            let attachment = attachment.clone();
+            for connection in gui_state.display_state.connections.iter() {
+                if connection.1.progress == ConnectionProgress::CallRequestReceived {
+                    connection_request_popup(ctx, connection.0, &attachment);
+                }
+                let _ = ui.selectable_label(
+                    &gui_state.current_sidebar_button == &SidebarButton::Chat(connection.0.clone()),
+                    format!("{:?}", connection.0.clone()),
+                );
+            }
+        });
+    egui::CentralPanel::default().show(ctx, move |ui| {
+        let mut gui_state = gui_state2.try_lock().unwrap();
+        // let independent_state = independent_state2.try_read().unwrap();
+        let attachment = attachment2.clone();
+
+        ui.label(format!(
+            "Client ID: {}",
+            gui_state.display_state.connection_details.id
+        ));
+        ui.add(egui::TextEdit::singleline(&mut gui_state.remote_id).hint_text("Enter Remote ID"));
+        if ui.button("Connect").clicked() {
+            button_click(attachment, gui_state.remote_id.clone());
+        }
+
+        if let Some(connection) = gui_state
+            .display_state
+            .connections
+            .get(&gui_state.remote_id)
+        {
+            ui.label(format!("Connection Progress: {:?}", connection.progress));
+        }
+    });
+}
+fn button_click(attachment: Arc<Mutex<ChannelAttachment>>, remote_id: UserId) {
+    let (tx, _) = attachment.try_lock().unwrap().clone();
+    tx.try_send(Command::GUI(GUICommand::CallRequest(remote_id.clone())))
+        .unwrap();
 }
 impl eframe::App for Chaos {
     //fn save(&mut self, storage: &mut dyn Storage) {
     //    eframe::set_value(storage, eframe::APP_KEY, self);
-    //}
+    //}bin
     fn update(&mut self, ctx: &Context, eframe: &mut Frame) {
+        let Self {
+            gui_state,
+            // independent_state,
+            attachment,
+            reader_thread,
+        } = self;
+        menu_bar(ctx);
+        app_body(ctx, gui_state, /*independent_state,*/ attachment);
+        if !(*reader_thread) {
+            *reader_thread = true;
+            let ctx = ctx.clone();
+            let attachment = attachment.clone();
+            let gui_state = gui_state.clone();
+            tokio::spawn(async move {
+                let (_, rx) = attachment.try_lock().unwrap().clone();
+                println!("Starting gui listener");
+                let gui_state = gui_state.clone();
+                while let Ok(command) = rx.recv() {
+                    println!("Received a message on GUI listener.");
+                    if let Command::GUI(gui_command) = command {
+                        use GUICommand::*;
+                        match gui_command {
+                            UpdateState(independent_state) => {
+                                
+                                
+                                let mut gui_state = gui_state.try_lock().unwrap();
+                                gui_state.display_state = independent_state;
+                                ctx.request_repaint();
+                                println!("Updated gui state.");
+                            }
+                            _ => {
+                                println!("Not implemented yet");
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+    /* fn update(&mut self, ctx: &Context, eframe: &mut Frame) {
         let Self {
             remote_client_id,
             client_id,
@@ -133,6 +280,7 @@ impl eframe::App for Chaos {
                 egui::widgets::global_dark_light_mode_buttons(ui);
             });
         });
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.label(format!(
                 "Your Client ID is: {}",
@@ -152,7 +300,7 @@ impl eframe::App for Chaos {
                 CCErrors::None => (),
             }
             if *call_request.try_lock().unwrap(){
-                
+
                 ctx.show_viewport_immediate(
                     egui::ViewportId::from_hash_of("immediate_viewport"),
                     egui::ViewportBuilder::default().with_title("Call Request").with_inner_size([200.0, 100.0]), |ctx, class| {
@@ -160,12 +308,12 @@ impl eframe::App for Chaos {
                     ui.label(format!("You have received a call request from: {}. Would you like to accept it?", remote_client_id));
                     if ui.button("Agree").clicked() {
 
-                       *call_request.try_lock().unwrap() = false; 
+                       *call_request.try_lock().unwrap() = false;
                        //Send answer
                        let msg  = CommunicationType::SendCCMessage(CCMessage::CallAnswer(true, None) );
-                        
+
                        tx_gui.try_send(msg).unwrap();
-                       
+
                     }
                    if  ui.button("Cancel").clicked() {
 
@@ -175,8 +323,8 @@ impl eframe::App for Chaos {
                         });
 
                 });
-                
-            } 
+
+            }
             if ui.button("Connect").clicked() {
                 //TODO:  Connect to other clients
                 let mut connection_errors = connection_errors.try_lock().unwrap();
@@ -200,7 +348,7 @@ impl eframe::App for Chaos {
             }
 
             for user_message in user_messages.try_read().unwrap().iter() {
-                ui.label(user_message.client_id.clone() + &*user_message.message_content.clone());
+                ui.label(&user_message.message_content);
             }
             ui.add(egui::TextEdit::multiline(current_message).hint_text("Enter Message"));
 
@@ -214,5 +362,5 @@ impl eframe::App for Chaos {
                 current_message.clear();
             }
         });
-    }
+    }*/
 }
