@@ -172,14 +172,18 @@ fn app_body(
                 gui_state.current_sidebar_button = SidebarButton::NewConnection;
             }
             let attachment = attachment.clone();
+
             for connection in gui_state.display_state.connections.iter() {
                 if connection.1.progress == ConnectionProgress::CallRequestReceived {
                     connection_request_popup(ctx, connection.0, &attachment);
                 }
-                let _ = ui.selectable_label(
+                let sidebar_selected_changed = ui.selectable_label(
                     &gui_state.current_sidebar_button == &SidebarButton::Chat(connection.0.clone()),
                     format!("{:?}", connection.0.clone()),
                 );
+                if sidebar_selected_changed.clicked() {
+                    gui_state.current_sidebar_button = SidebarButton::Chat(connection.0.clone());
+                }
             }
         });
     egui::CentralPanel::default().show(ctx, move |ui| {
@@ -238,8 +242,6 @@ impl eframe::App for Chaos {
                         use GUICommand::*;
                         match gui_command {
                             UpdateState(independent_state) => {
-                                
-                                
                                 let mut gui_state = gui_state.try_lock().unwrap();
                                 gui_state.display_state = independent_state;
                                 ctx.request_repaint();

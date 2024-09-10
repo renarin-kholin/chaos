@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 pub type UserId = String;
 pub type SDP = String;
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
 pub struct ChaosMessage {
     pub client_id: String,
     pub message_content: String,
@@ -25,12 +25,12 @@ pub enum ConnectionProgress {
     Established,
 }
 
-#[derive(Default, Serialize, Deserialize, Clone, Debug)]
+#[derive(PartialEq, Default, Serialize, Deserialize, Clone, Debug)]
 pub struct ConnectionDetails {
     pub id: UserId,
     pub sdp: SDP,
 }
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
 pub struct Connection {
     remote: ConnectionDetails,
     messages: Vec<ChaosMessage>,
@@ -52,7 +52,7 @@ impl Connection {
         self.progress = progress;
     }
 }
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
 pub struct IndependentState {
     pub connection_details: ConnectionDetails,
     pub connections: HashMap<UserId, Connection>,

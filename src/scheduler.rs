@@ -8,13 +8,13 @@ use crate::peer;
 use crate::state::{Connection, ConnectionProgress, UserId, SDP};
 use crate::{state::IndependentState, utils::Attach};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub enum GUICommand {
     CallRequest(UserId),
     CallAnswer(bool, UserId),
     UpdateState(IndependentState),
 }
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, Clone)]
 pub enum WSCommand {
     SetClientId(UserId),
     CallRequest(UserId),
@@ -22,21 +22,21 @@ pub enum WSCommand {
     CallAnswer(bool, Option<SDP>),
     CallReply(SDP),
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub enum PeerCommand {
     NewPeerConnection(UserId),
     CallAnswer(SDP),
 
-    EstablishConnection( SDP, bool),
-    CallReply( SDP),
+    EstablishConnection(SDP, bool),
+    CallReply(SDP),
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
 pub enum StateCommand {
     SetClientId(UserId),
     SetProgress(UserId, ConnectionProgress),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(PartialEq, Debug, Deserialize, Serialize)]
 pub enum Command {
     GUI(GUICommand),
     WS(WSCommand),
@@ -167,22 +167,28 @@ impl Scheduler {
                         Command::WS(ws_command) => match ws_command {
                             WSCommand::CallAnswer(accepted, remote_sdp) => {
                                 let attachments = attachments.try_lock().unwrap();
-                                if(accepted){
+                                if (accepted) {
                                     let (tx_peer, _) = attachments.get(&ThreadTypes::Peer).unwrap();
                                     tx_peer
-                                        .try_send(Command::Peer(PeerCommand::EstablishConnection(remote_sdp.unwrap(), false)))
+                                        .try_send(Command::Peer(PeerCommand::EstablishConnection(
+                                            remote_sdp.unwrap(),
+                                            false,
+                                        )))
                                         .unwrap();
                                 }
-
-                            },
+                            }
                             WSCommand::CallReply(remote_sdp) => {
                                 let attachments = attachments.try_lock().unwrap();
                                 let (tx_peer, _) = attachments.get(&ThreadTypes::Peer).unwrap();
                                 tx_peer
-                                    .try_send(Command::Peer(PeerCommand::EstablishConnection(remote_sdp, true)))
+                                    .try_send(Command::Peer(PeerCommand::EstablishConnection(
+                                        remote_sdp, true,
+                                    )))
                                     .unwrap();
-                            },
-                            _ => {println!("Not implemented yet.");}
+                            }
+                            _ => {
+                                println!("Not implemented yet.");
+                            }
                         },
                         Command::Peer(peer_command) => match peer_command {
                             PeerCommand::CallAnswer(local_sdp) => {
@@ -194,7 +200,7 @@ impl Scheduler {
                                 )))
                                 .unwrap();
                             }
-                            PeerCommand::CallReply( local_sdp) => {
+                            PeerCommand::CallReply(local_sdp) => {
                                 let attachments = attachments.try_lock().unwrap();
                                 let (tx, _) = attachments.get(&ThreadTypes::Coupler).unwrap();
                                 tx.try_send(Command::WS(WSCommand::CallReply(local_sdp)))

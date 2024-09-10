@@ -1,7 +1,8 @@
 [package]
 name = "chaos"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
+authors = ["renarin"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,6 +13,7 @@ eframe = {version = "0.25.0", features = ["default"] }
 env_logger = "0.10.1"
 serde = {version ="1.0.195", features = ["derive"]}
 tokio = { version = "1.32.0", features = ["full"]}
+tokio-util ={ version = "*"}
 webrtc = "0.10.1"
 rand = "0.8.5"
 anyhow = "1.0.82"
@@ -21,3 +23,7 @@ url = "2.5.0"
 tokio-tungstenite = "0.21.0"
 futures-util = "0.3.30"
 crossbeam-channel = "0.5.12"
+dioxus = { version = "0.6.0-alpha.2", features = ["desktop", "router"] }
+dioxus-logger = "0.5.1"
+manganis = "0.3.0-alpha.2"
+
